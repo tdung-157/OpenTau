@@ -1,0 +1,108 @@
+{
+    "dataset_mixture": {
+        "datasets": [
+            {
+                "repo_id": "astri_cf_old_opentau",
+                "control_mode": "joint_position",
+                "data_features_name_mapping": {
+                    "camera0": "observation.images.cam_head",
+                    "camera1": "observation.images.cam_left_wrist",
+                    "camera2": "observation.images.cam_right_wrist",
+                    "state": "observation.state",
+                    "actions": "action",
+                    "prompt": "task",
+                    "response": "response"
+                },
+                "use_delta_joint_actions": true,
+                "delta_action_state_map": {
+                    "0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6,
+                    "7": 7, "8": 8, "9": 9, "10": 10, "11": 11, "12": 12, "13": 13
+                }
+            }
+        ],
+        "weights": [1.0],
+        "action_freq": 30.0,
+        "image_resample_strategy": "nearest",
+        "vector_resample_strategy": "nearest",
+        "val_split_ratio": 0.05,
+        "subgoal_drop_prob": 1.0
+    },
+    "policy": {
+        "type": "pi05",
+        "pretrained_path": "TensorAuto/pi05_base",
+        "n_obs_steps": 1,
+        "normalization_mapping": {
+            "VISUAL": "IDENTITY",
+            "STATE": "MIN_MAX",
+            "ACTION": "MEAN_STD"
+        },
+        "chunk_size": 50,
+        "n_action_steps": 50,
+        "max_state_dim": 32,
+        "max_action_dim": 32,
+        "state_type": "discrete",
+        "predict_response": true,
+        "knowledge_insulation": true,
+        "freeze_vision_encoder": true,
+        "train_expert_only": false,
+        "prompt_max_length": 256,
+        "response_max_length": 52,
+        "discrete_action_max_length": 192,
+        "proj_width": 1024,
+        "dropout": 0.1,
+        "num_steps": 10,
+        "attention_implementation": "sdpa",
+        "gradient_checkpointing": false,
+        "use_torch_compile": true,
+        "optimizer_lr": 5e-05,
+        "optimizer_betas": [0.9, 0.95],
+        "optimizer_eps": 1e-08,
+        "optimizer_weight_decay": 1e-10,
+        "scheduler_warmup_steps": 1000,
+        "scheduler_decay_steps": 30000,
+        "scheduler_decay_lr": 5e-06
+    },
+    "output_dir": "outputs/pi05_astribot_subtask",
+    "resume": false,
+    "seed": 1000,
+    "resolution": [224, 224],
+    "num_cams": 3,
+    "max_state_dim": 32,
+    "max_action_dim": 32,
+    "action_chunk": 50,
+    "loss_weighting": {"MSE": 1, "CE": 1},
+    "num_workers": 8,
+    "batch_size": 32,
+    "gradient_accumulation_steps": 4,
+    "dataloader_batch_size": 8,
+    "prefetch_factor": 4,
+    "steps": 30000,
+    "log_freq": 50,
+    "save_checkpoint": true,
+    "save_freq": 5000,
+    "val_freq": 1000,
+    "use_policy_training_preset": false,
+    "trace_nans": false,
+    "optimizer": {
+        "type": "adamw",
+        "lr": 5e-05,
+        "weight_decay": 1e-10,
+        "grad_clip_norm": 1.0,
+        "betas": [0.9, 0.95],
+        "eps": 1e-08
+    },
+    "scheduler": {
+        "type": "cosine_decay_with_warmup",
+        "num_warmup_steps": 1000,
+        "num_decay_steps": 30000,
+        "peak_lr": 5e-05,
+        "decay_lr": 5e-06
+    },
+    "wandb": {
+        "enable": false,
+        "project": "pi05-astribot",
+        "name": "pi05_astribot_subtask",
+        "notes": "pi05 on astri_making_coffee: prompt='Make an iced coffee', per-frame subtask as response",
+        "tags": ["pi05", "astribot", "coffee", "subtask-response"]
+    }
+}
