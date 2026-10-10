@@ -64,8 +64,10 @@ export TOKENIZERS_PARALLELISM=false
 
 # `accelerate launch` is invoked directly rather than through the `opentau-train` console
 # script, because that wrapper routes unknown flags to train.py -- so --num_processes could not
-# reach accelerate. Direct invocation therefore skips the allocator default that
-# scripts/launch.py would have set; set it here. pi05 on an 80 GB card sits at the allocator's
+# reach accelerate. It goes through `uv run` because a Slurm batch job gets no shell profile and
+# so no activated venv: a bare `accelerate` exits 127, command-not-found, before the job logs
+# anything useful. Direct invocation also skips the allocator default that scripts/launch.py
+# would have set; set it here. pi05 on an 80 GB card sits at the allocator's
 # edge and OOMs on fragmentation without expandable segments (issue #264).
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
@@ -103,7 +105,7 @@ echo "[train] config=$CONFIG gpus=$NGPU workers/rank=$NUM_WORKERS port=$PORT"
 echo "[train] global_batch=$GLOBAL_BATCH = ${NGPU} rank(s) x ${MICRO_BATCH} micro x ${ACCUM} accum"
 echo "[train] HF_OPENTAU_HOME=$HF_OPENTAU_HOME HF_HOME=$HF_HOME"
 
-exec accelerate launch \
+exec uv run -- accelerate launch \
   --num_machines 1 \
   --num_processes "$NGPU" \
   --mixed_precision bf16 \
