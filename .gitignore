@@ -32,7 +32,7 @@ nautilus/*.yaml
 *.key
 
 # Slurm
-sbatch*.sh
+# sbatch*.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
