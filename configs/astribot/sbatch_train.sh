@@ -1,14 +1,27 @@
 #!/bin/bash
 #SBATCH --job-name=opentau_pi05_astribot
-#SBATCH --nodelist=worker-0
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --gpus=2
-#SBATCH --cpus-per-task=30
-#SBATCH --mem-per-cpu=8192
-#SBATCH --time=3-00:00:00
+#SBATCH --gpus=1
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=96G
+#SBATCH --time=1-00:00:00
 #SBATCH --output=logs/train_%j.out
 #SBATCH --error=logs/train_%j.err
+#
+# Resource asks are deliberately modest so the job can BACKFILL on a busy queue. The openpi
+# script this was modelled on pins --nodelist=worker-0 and asks for 30 CPUs / 240 GB / 3 days;
+# that combination sits in PD (Priority) behind every higher-priority job because the scheduler
+# can never prove it fits in a gap. Notes on each:
+#   no --nodelist : let Slurm place the job. The pin only narrows what can schedule you.
+#   --gpus=1      : the script derives the batch split from SLURM_GPUS_ON_NODE, so 1 or 2 both
+#                   give the same GLOBAL_BATCH=32. Override with `sbatch --gpus=2 ...`.
+#   --cpus-per-task=12 : dataloader workers only. Some nodes report just 16 CPUs total, so 30
+#                   is unsatisfiable there. 12 -> 10 workers/rank, enough for video decode.
+#   --mem=96G     : a total, not per-CPU. --mem-per-cpu=8192 x 30 silently asked for 240 GB.
+#   --time=1-00:00:00 : save_freq=5000 writes checkpoints throughout, so a shorter window is
+#                   safe -- requeue with `sbatch configs/astribot/sbatch_train.sh --resume=true`
+#                   and it picks up from the last checkpoint. A 3-day ask cannot backfill.
 #
 # Fine-tune pi05 on the Astribot iced-coffee dataset (prompt = "Make an iced coffee",
 # per-frame subtask supervised as `response`).
@@ -48,6 +61,18 @@ export HF_OPENTAU_HOME="${HF_OPENTAU_HOME:-/mnt/data/dungnt232_1/data}"
 #     HF_HOME=/mnt/data/dungnt232_1/hf_cache hf download TensorAuto/pi05_base
 # A private repo also needs HF_TOKEN exported, or the token file copied into $HF_HOME.
 export HF_HOME="${HF_HOME:-/mnt/data/dungnt232_1/hf_cache}"
+
+# Redirecting HF_HOME also moves where huggingface_hub looks for the auth token
+# ($HF_HOME/token), orphaning the one `hf auth login` wrote to ~/.cache/huggingface. That
+# matters because pi05 pulls the PaliGemma tokenizer from the GATED repo
+# google/paligemma-3b-pt-224 (modeling_pi05.py), so an unauthenticated job dies with a 401
+# before step 0. Carry the token across explicitly -- HF_TOKEN takes precedence over the file,
+# and nothing secret is stored in this script.
+if [[ -z "${HF_TOKEN:-}" && -r "$HOME/.cache/huggingface/token" ]]; then
+  HF_TOKEN="$(< "$HOME/.cache/huggingface/token")"
+  export HF_TOKEN
+fi
+[[ -n "${HF_TOKEN:-}" ]] || echo "[train] WARNING: no HF_TOKEN; gated google/paligemma-3b-pt-224 will 401 on a cache miss" >&2
 
 # train.py logs metrics through logging/tqdm to stdout. Slurm redirects stdout to a file, so
 # Python block-buffers it at 8 KB and the loss lines would only appear in large bursts. W&B is
