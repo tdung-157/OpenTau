@@ -56,6 +56,7 @@
 #                 used only for a fresh run; a resume reads the checkpoint's train_config.json
 #   OUTPUT_DIR    run dir to resume from           (default: the config's output_dir)
 #   TOTAL_STEPS   absolute step to train to        (default: 530000 = 30k first run + 500k)
+#   DEBUG_DIST    1 = c10d collective-mismatch checks (see below)
 #   GLOBAL_BATCH  batch across ALL ranks           (default: 32, matching openpi's batch_size=32)
 #   MICRO_BATCH   per-rank per-step batch          (default: 8; lower this first on OOM)
 # Extra args pass through to train.py, e.g. --log_freq=100
@@ -155,6 +156,17 @@ export TOKENIZERS_PARALLELISM=false
 # would have set; set it here. pi05 on an 80 GB card sits at the allocator's
 # edge and OOMs on fragmentation without expandable segments (issue #264).
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+
+# DEBUG_DIST=1: diagnose an NCCL watchdog timeout (ranks issuing different collectives).
+# DETAIL makes c10d check every collective's op/shape across ranks before running it and
+# raise naming the mismatch on both ranks, instead of hanging until the watchdog fires with
+# no Python stack. Slows each step; use only for the few steps needed to hit the failure.
+if [[ "${DEBUG_DIST:-0}" == 1 ]]; then
+  export TORCH_DISTRIBUTED_DEBUG=DETAIL
+  export TORCH_NCCL_TRACE_BUFFER_SIZE=20000
+  export TORCH_NCCL_DUMP_ON_TIMEOUT=1
+  export TORCH_SHOW_CPP_STACKTRACES=1
+fi
 
 NGPU="${SLURM_GPUS_ON_NODE:-1}"
 CPUS="${SLURM_CPUS_PER_TASK:-8}"
