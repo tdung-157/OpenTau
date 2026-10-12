@@ -320,6 +320,40 @@ def reseed_new_ranks_on_resume(
             )
 
 
+def align_accumulation_step_on_resume(
+    checkpoint_dir: Path,
+    accelerator: "accelerate.Accelerator",
+) -> None:
+    """Give ranks with no per-rank RNG file rank 0's gradient-accumulation step counter.
+
+    Accelerate stores ``accelerator.step`` -- the micro-step counter whose
+    ``step % gradient_accumulation_steps == 0`` decides which micro-step syncs
+    gradients -- inside ``random_states_<process_index>.pkl``. When resuming on
+    more GPUs than the checkpoint was saved with, the new ranks have no such file,
+    so ``load_state`` leaves their counter at 0 while the surviving ranks restore
+    the saved value. Whenever that value is not a multiple of the accumulation
+    steps the ranks then disagree on which micro-step runs DDP's gradient
+    all-reduce: one rank enters the bucket all-reduces while another skips to the
+    next collective, and the job hangs at the NCCL watchdog with no Python error.
+
+    Reads rank 0's file on every rank that lacks its own (a local read, no
+    collective, identical on every rank). Surviving ranks are not touched.
+
+    Args:
+        checkpoint_dir: Directory holding the saved ``random_states_*.pkl`` files.
+        accelerator: The current Accelerator; its ``step`` is overwritten on new ranks.
+    """
+    from accelerate.utils import load
+
+    own_file = checkpoint_dir / f"random_states_{accelerator.process_index}.pkl"
+    rank0_file = checkpoint_dir / "random_states_0.pkl"
+    if own_file.exists() or not rank0_file.exists():
+        return
+    states = load(rank0_file, weights_only=False)
+    if "step" in states:
+        accelerator.step = states["step"]
+
+
 def load_training_state(checkpoint_dir: Path) -> tuple[int, Optimizer, LRScheduler | None]:
     """Load training state including step, optimizer, scheduler, and RNG state.
 

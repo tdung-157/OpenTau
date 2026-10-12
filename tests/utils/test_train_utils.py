@@ -23,6 +23,7 @@ from opentau.constants import (
 )
 from opentau.utils.train_utils import (
     RunningBestTracker,
+    align_accumulation_step_on_resume,
     find_missing_rng_state_ranks,
     get_step_checkpoint_dir,
     get_step_identifier,
@@ -343,6 +344,72 @@ class TestReseedNewRanksOnResume:
             reseed_new_ranks_on_resume(tmp_path, acc_nonmain, seed=42)
         scale_down_msgs = [rec for rec in caplog.records if "Resuming on fewer processes" in rec.message]
         assert scale_down_msgs == []
+
+
+def _save_accelerate_rng_file(checkpoint_dir: Path, process_index: int, step: int) -> None:
+    """Write a ``random_states_<i>.pkl`` with the keys accelerate's ``save_accelerator_state`` uses."""
+    import random
+
+    import numpy as np
+    import torch
+
+    torch.save(
+        {
+            "step": step,
+            "random_state": random.getstate(),
+            "numpy_random_seed": np.random.get_state(),
+            "torch_manual_seed": torch.get_rng_state(),
+        },
+        checkpoint_dir / f"random_states_{process_index}.pkl",
+    )
+
+
+class TestAlignAccumulationStepOnResume:
+    """A rank with no RNG file must adopt rank 0's saved ``accelerator.step``.
+
+    Otherwise ``step % gradient_accumulation_steps`` differs across ranks, they disagree
+    on which micro-step all-reduces gradients, and DDP hangs at the NCCL watchdog.
+    """
+
+    # Not a multiple of any accumulation count used here, so a counter left at 0 is
+    # out of phase with the restored one -- the configuration that hung.
+    SAVED_STEP = 119_999
+
+    def test_new_rank_adopts_rank0_step_and_syncs_on_the_same_micro_steps(self, tmp_path):
+        # Saved on 1 rank, resuming on 2: load_state restored rank 0's counter, left rank 1's at 0.
+        _save_accelerate_rng_file(tmp_path, 0, self.SAVED_STEP)
+        rank0 = _make_accelerator(num_processes=2, process_index=0)
+        rank0.step = self.SAVED_STEP
+        rank1 = _make_accelerator(num_processes=2, process_index=1)
+        rank1.step = 0
+
+        for acc in (rank0, rank1):
+            align_accumulation_step_on_resume(tmp_path, acc)
+
+        assert rank1.step == self.SAVED_STEP
+        # The property that matters: accelerate's `_do_sync` predicate fires on the same
+        # micro-steps on both ranks, for each accumulation count this run used.
+        for accum in (2, 4):
+            sync_pattern = [
+                [(acc.step + k) % accum == 0 for k in range(1, 2 * accum + 1)] for acc in (rank0, rank1)
+            ]
+            assert sync_pattern[0] == sync_pattern[1]
+
+    def test_rank_with_its_own_file_is_untouched(self, tmp_path):
+        # A surviving rank keeps what load_state restored from its own file, even if
+        # rank 0's file says otherwise.
+        _save_accelerate_rng_file(tmp_path, 0, self.SAVED_STEP)
+        _save_accelerate_rng_file(tmp_path, 1, 7)
+        acc = _make_accelerator(num_processes=3, process_index=1)
+        acc.step = 7
+        align_accumulation_step_on_resume(tmp_path, acc)
+        assert acc.step == 7
+
+    def test_missing_rank0_file_is_noop(self, tmp_path):
+        acc = _make_accelerator(num_processes=2, process_index=1)
+        acc.step = 0
+        align_accumulation_step_on_resume(tmp_path, acc)
+        assert acc.step == 0
 
 
 # ---------------------------------------------------------------------------

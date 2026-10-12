@@ -58,6 +58,7 @@ from opentau.utils.accelerate_utils import set_proc_accelerator
 from opentau.utils.logging_utils import AverageMeter, MetricsTracker
 from opentau.utils.random_utils import set_seed
 from opentau.utils.train_utils import (
+    align_accumulation_step_on_resume,
     find_missing_rng_state_ranks,
     get_step_checkpoint_dir,
     get_step_identifier,
@@ -1109,6 +1110,9 @@ def train(cfg: TrainPipelineConfig):
         # them — identical across all new ranks. Re-seed those new ranks
         # deterministically here.
         reseed_new_ranks_on_resume(cfg.checkpoint_path, accelerator, cfg.seed)
+        # The same missing per-rank file also leaves new ranks' gradient-accumulation
+        # counter at 0, desyncing which micro-step all-reduces gradients (NCCL hang).
+        align_accumulation_step_on_resume(Path(cfg.checkpoint_path), accelerator)
 
         logging.info(f"Resuming training from checkpoint {cfg.checkpoint_path}")
 

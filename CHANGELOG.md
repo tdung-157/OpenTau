@@ -295,6 +295,17 @@ It now compares every sample's first action over the dataset's pre-pad width
 chunk-start state the policy added. That state cancels exactly, and R², now scored against the
 ground truth, measures the deltas rather than joint positions the policy was given.
 
+### Fixed — resuming on more GPUs than the checkpoint was saved with no longer hangs DDP under gradient accumulation
+
+Accelerate keeps its gradient-accumulation micro-step counter (`accelerator.step`) in the
+per-rank `random_states_<rank>.pkl`. A rank added on resume has no such file, so its counter
+started at 0 while the surviving ranks restored the saved value. With
+`gradient_accumulation_steps > 1` the ranks then disagreed on which micro-step all-reduces
+gradients, and the job hung at the NCCL watchdog with no Python error (e.g. a 1-GPU checkpoint
+resumed on 2 GPUs). New ranks now take rank 0's saved counter
+(`align_accumulation_step_on_resume`), alongside the existing RNG reseed. Same-world-size
+resumes are unaffected.
+
 ## [0.14.0] - 2026-09-14
 
 ### Added — best-of-N action-chunk sampling — **opt-in, default `1`, no `config_version` bump**
