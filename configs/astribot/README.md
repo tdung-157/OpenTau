@@ -31,6 +31,33 @@ own subtask, so `tasks.yaml`-style live prompt stepping is not needed. The promp
 still match what `deploy_ros2.py` sends (`"Make an iced coffee"`) — it is baked into
 `meta/tasks.jsonl` at dataset-prep time, so changing one means regenerating the other.
 
+### Variant: subtask as the prompt (`pi05_astribot_subtask_prompt.json`)
+
+The openpi `pi05_astribot_anno` equivalent: the per-frame subtask string is the **prompt**,
+and the model no longer predicts a response. It reuses the same prepared dataset — the only
+data-side change is `"prompt": "response"` in `data_features_name_mapping`, which feeds the
+`response` column into the prompt slot instead of the constant `tasks.jsonl` entry. The rest:
+
+- `"predict_response": false` — nothing left to supervise as text; the backbone is now
+  trained by the discrete-action CE alone (knowledge insulation still on).
+- `"response": "response"` stays mapped even though it is unused, so every sample carries the
+  same keys (`response_drop_prob` writes a `response` key, and a key present on only some
+  samples breaks collation).
+- Separate `output_dir`, so it never resumes from the response-predicting run's checkpoints.
+
+This is the `sbatch_train.sh` default (pinned to `worker-0`, 2 GPUs). The response-predicting
+config above is now opt-in:
+
+```bash
+sbatch configs/astribot/sbatch_train.sh                                                   # this variant
+CONFIG=configs/astribot/pi05_astribot_subtask.json sbatch configs/astribot/sbatch_train.sh # response variant
+```
+
+Deployment consequence: the served policy needs the **current subtask** as its prompt, so the
+deploy side must step through the subtask strings (`tasks.yaml`-style live prompt stepping)
+instead of sending the constant `"Make an iced coffee"`. The strings must match the dataset's
+subtask labels exactly.
+
 ## Dataset
 
 Built from the labelled source by [`prepare_astri_for_pi05.py`](prepare_astri_for_pi05.py),

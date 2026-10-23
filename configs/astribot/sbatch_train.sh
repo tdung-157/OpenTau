@@ -2,10 +2,11 @@
 #SBATCH --job-name=opentau_pi05_astribot
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --nodelist=worker-0
 #SBATCH --gpus=2
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=128G
-#SBATCH --time=1-00:00:00
+#SBATCH --cpus-per-task=30
+#SBATCH --mem-per-cpu=8192
+#SBATCH --time=8-00:00:00
 #SBATCH --output=logs/train_%j.out
 #SBATCH --error=logs/train_%j.err
 #
@@ -13,18 +14,21 @@
 # script this was modelled on pins --nodelist=worker-0 and asks for 30 CPUs / 240 GB / 3 days;
 # that combination sits in PD (Priority) behind every higher-priority job because the scheduler
 # can never prove it fits in a gap. Notes on each:
-#   no --nodelist : let Slurm place the job. The pin only narrows what can schedule you.
-#   --gpus=1      : the script derives the batch split from SLURM_GPUS_ON_NODE, so 1 or 2 both
-#                   give the same GLOBAL_BATCH=32. Override with `sbatch --gpus=2 ...`.
+#   --nodelist=worker-0 : pinned on purpose. The pin only narrows what can schedule you, so if
+#                   the job sits in PD for long, drop it with `sbatch --nodelist= ...`.
+#   --gpus=2      : the script derives the batch split from SLURM_GPUS_ON_NODE, so 1 or 2 both
+#                   give the same GLOBAL_BATCH=32. Override with `sbatch --gpus=1 ...`.
 #   --cpus-per-task=12 : dataloader workers only. Some nodes report just 16 CPUs total, so 30
 #                   is unsatisfiable there. 12 -> 10 workers/rank, enough for video decode.
 #   --mem=96G     : a total, not per-CPU. --mem-per-cpu=8192 x 30 silently asked for 240 GB.
-#   --time=1-00:00:00 : save_freq=5000 writes checkpoints throughout, so a shorter window is
+#   --time=8-00:00:00 : save_freq=5000 writes checkpoints throughout, so a shorter window is
 #                   safe -- requeue with `sbatch configs/astribot/sbatch_train.sh --resume=true`
 #                   and it picks up from the last checkpoint. A 3-day ask cannot backfill.
 #
-# Fine-tune pi05 on the Astribot iced-coffee dataset (prompt = "Make an iced coffee",
-# per-frame subtask supervised as `response`).
+# Fine-tune pi05 on the Astribot iced-coffee dataset with the per-frame subtask as the prompt
+# (no response prediction). For the response-predicting variant (prompt = "Make an iced
+# coffee", subtask supervised as `response`), pass
+# CONFIG=configs/astribot/pi05_astribot_subtask.json.
 #
 # Run `mkdir -p logs` once before the first submit -- Slurm opens the --output file BEFORE
 # this script runs, so a missing logs/ dir fails the job at launch with no log to explain it.
@@ -37,7 +41,7 @@
 #   sbatch configs/astribot/sbatch_train.sh
 #
 # Env knobs:
-#   CONFIG        path to the training JSON        (default: configs/astribot/pi05_astribot_subtask.json)
+#   CONFIG        path to the training JSON        (default: configs/astribot/pi05_astribot_subtask_prompt.json)
 #   GLOBAL_BATCH  batch across ALL ranks           (default: 32, matching openpi's batch_size=32)
 #   MICRO_BATCH   per-rank per-step batch          (default: 4 -- 8 OOMs under 2-GPU DDP; lower this first on OOM)
 # Extra args pass through to train.py, e.g. --steps=60000 --resume=true
@@ -47,7 +51,7 @@ set -euo pipefail
 # Slurm copies this script to the node's spool dir, so BASH_SOURCE cannot locate the checkout.
 cd "${SLURM_SUBMIT_DIR:-/mnt/data/dungnt232_1/repos/OpenTau}"
 
-CONFIG="${CONFIG:-configs/astribot/pi05_astribot_subtask.json}"
+CONFIG="${CONFIG:-configs/astribot/pi05_astribot_subtask_prompt.json}"
 
 # `root` is deliberately absent from the dataset entry, so the repo_id resolves to
 # $HF_OPENTAU_HOME/<repo_id> -- openpi's HF_LEROBOT_HOME pattern, so the same JSON works on
