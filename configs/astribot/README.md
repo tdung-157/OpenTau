@@ -58,6 +58,49 @@ deploy side must step through the subtask strings (`tasks.yaml`-style live promp
 instead of sending the constant `"Make an iced coffee"`. The strings must match the dataset's
 subtask labels exactly.
 
+### Second task: serving brewed coffee (`pi05_astribot_serving_coffee_subtask_prompt.json`)
+
+Same robot, same subtask-as-prompt recipe as above, on a different task:
+`serving_brewed_coffee_lrb_opentau` (374 episodes, ~1.1–1.3k frames each). The only config
+changes from `pi05_astribot_subtask_prompt.json` are `repo_id`, `output_dir` and the wandb
+labels: same 16-dim joint layout with grippers last, so the delta map `{0..13}` carries over.
+
+Differences in the data itself:
+
+- **LeRobot v3.0**, not v2.1 (`meta/tasks.parquet`, consolidated `file-*.parquet`/`mp4`,
+  per-episode stats in `meta/episodes/`). OpenTau reads it natively. **No prep script**: the
+  `response` column (Flora-generated, video-repaired subtask captions, not human verified) is
+  already in the data, so `prepare_astri_for_pi05.py` does not apply.
+- Captions are free-form, so the same subtask appears under many phrasings (40 distinct
+  strings in a 5-episode sample). The deploy-side prompt must match one of them closely.
+- Cameras are 360×640 (vs 480×640); letterboxing to 224×224 handles it.
+- FAST action tokens measured on the 5-episode sample (with the quantile stats below):
+  p50 37, p99 77, max 89 — the 192 cap has ample headroom.
+
+**Normalization comes from openpi, not the dataset.** `norm_stats_override_path` points at
+[`norm_stats/serving_brewed_coffee_lrb.json`](norm_stats/serving_brewed_coffee_lrb.json), the
+openpi `pi05_astribot_mem_full` stats for this dataset (delta joints, absolute grippers — the
+same action space as this config). To match openpi's pi05 (`use_quantile_norm`), STATE and
+ACTION are `QUANTILE` here, not `MIN_MAX`/`MEAN_STD` as in the coffee configs. Two edits were
+needed on top of openpi's file:
+
+- **Padded 16 → 32 dims with zeros.** OpenTau normalizes after padding to `max_state_dim`/
+  `max_action_dim`, and zero is what dataset-derived stats use for the padded dims.
+- **`actions.min`/`max` = `q01`/`q99`.** pi05's discrete-action (FAST) normalizer is hardcoded
+  to `MIN_MAX` and fails on a missing `min`; aliasing makes the FAST targets quantile-scaled
+  too.
+
+The override replaces the dataset stats and the auto-computed delta-action stats (a warning
+logs this at startup). If you regenerate the openpi stats, redo both edits.
+
+```bash
+mkdir -p logs
+sbatch configs/astribot/sbatch_train_serving_coffee.sh
+```
+
+`sbatch_train_serving_coffee.sh` sets its own job name and `logs/train_serving_coffee_%j.*`
+logs and then execs `sbatch_train.sh` with this `CONFIG`, so every knob there applies.
+
 ## Dataset
 
 Built from the labelled source by [`prepare_astri_for_pi05.py`](prepare_astri_for_pi05.py),
