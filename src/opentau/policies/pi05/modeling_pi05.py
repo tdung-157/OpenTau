@@ -1085,9 +1085,17 @@ class PI05Policy(PreTrainedPolicy):
         )
         state = batch["state"]
         state_cpu = state.to(device="cpu", dtype=torch.float32)
-        if torch.any(state_cpu < -1.0) or torch.any(state_cpu > 1.0):
+        # Warn once per process, not per step: under QUANTILE normalization roughly 1-2% of
+        # values fall outside [q01, q99] on every batch by construction, so a per-step warning
+        # floods the log. The clamp below handles them either way.
+        if not getattr(self, "_warned_state_out_of_range", False) and (
+            torch.any(state_cpu < -1.0) or torch.any(state_cpu > 1.0)
+        ):
+            self._warned_state_out_of_range = True
             logging.warning(
-                f"State values are not normalized between -1 and 1. Min: {state_cpu.min().item()}, Max: {state_cpu.max().item()}"
+                f"State values are not normalized between -1 and 1. Min: {state_cpu.min().item()}, "
+                f"Max: {state_cpu.max().item()}. They are clamped to [-1, 1] before binning; expected "
+                "under QUANTILE normalization. Further occurrences are not logged."
             )
         state_clipped = torch.clamp(state_cpu, -1.0, 1.0)
         # replicate np.digitize with torch for torch.compile compatibility
